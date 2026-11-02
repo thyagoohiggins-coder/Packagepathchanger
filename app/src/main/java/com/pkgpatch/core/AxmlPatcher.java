@@ -14,7 +14,7 @@ import java.util.Set;
 
 /** Edits a binary AndroidManifest.xml to change the package name. */
 public final class AxmlPatcher {
-    private static final int XML_FILE = 0x0003, POOL = 0x0001, START_ELEM = 0x0102;
+    private static final int XML_FILE = 0x0003, POOL = 0x0001, START_ELEM = 0x0102, RES_MAP = 0x0180;
     private static final String ANDROID_NS = "http://schemas.android.com/apk/res/android";
     private static final Set<String> CLASS_ELEMS = new HashSet<>(Arrays.asList(
             "application", "activity", "activity-alias", "service", "receiver", "provider", "instrumentation"));
@@ -32,6 +32,18 @@ public final class AxmlPatcher {
     private boolean utf8;
     private int poolEnd;
     private int elemPos;
+    private boolean attrAndroid;
+    private int[] resMap = new int[0];
+    /** Manifest attributes we care about, by framework resource id (names may be stripped/obfuscated). */
+    private static final Map<Integer, String> ATTR_IDS = new HashMap<>();
+    static {
+        int[] ids = {0x01010003, 0x01010004, 0x01010006, 0x01010007, 0x01010008, 0x0101000a, 0x01010011,
+                0x01010012, 0x01010018, 0x01010021, 0x01010202, 0x0101027f, 0x010103a7};
+        String[] names = {"name", "manageSpaceActivity", "permission", "readPermission", "writePermission",
+                "permissionGroup", "process", "taskAffinity", "authorities", "targetPackage", "targetActivity",
+                "backupAgent", "parentActivityName"};
+        for (int i = 0; i < ids.length; i++) ATTR_IDS.put(ids[i], names[i]);
+    }
     private final List<String> strings = new ArrayList<>();
     private final List<byte[]> raw = new ArrayList<>();
 
@@ -69,6 +81,11 @@ public final class AxmlPatcher {
             raw.add(Arrays.copyOfRange(src, start, p));
         }
         poolEnd = off + size;
+        if (poolEnd + 8 <= src.length && (b.getShort(poolEnd) & 0xFFFF) == RES_MAP) {
+            int n = (b.getInt(poolEnd + 4) - 8) / 4;
+            resMap = new int[n];
+            for (int i = 0; i < n; i++) resMap[i] = b.getInt(poolEnd + 8 + 4 * i);
+        }
     }
 
     private int[] u8len(int p) {
@@ -113,7 +130,12 @@ public final class AxmlPatcher {
                 int cnt = b.getShort(p + 28) & 0xFFFF;
                 for (int i = 0; i < cnt; i++) {
                     int ap = p + 16 + attrStart + i * attrSize;
-                    v.visit(elem, b.getInt(ap), strings.get(b.getInt(ap + 4)), ap, b);
+                    int ni = b.getInt(ap + 4), ns = b.getInt(ap);
+                    int rid = ni >= 0 && ni < resMap.length ? resMap[ni] : 0;
+                    String an = ATTR_IDS.get(rid);
+                    if (an == null) an = strings.get(ni);
+                    attrAndroid = (rid >>> 16) == 0x0101 || ANDROID_NS.equals(nsOf(ns));
+                    v.visit(elem, ns, an, ap, b);
                 }
             }
             p += size;
@@ -162,8 +184,8 @@ public final class AxmlPatcher {
         final Set<String> declared = new HashSet<>();
         final Set<Integer> realProviders = new HashSet<>(); // <provider> with a class name, not <queries><provider>
         a.walk(rest, 0, (elem, ns, attr, ap, b) -> {
-            if (elem.equals("provider") && attr.equals("name") && ANDROID_NS.equals(a.nsOf(ns))) realProviders.add(a.elemPos);
-            if (DECL_PERM_ELEMS.contains(elem) && attr.equals("name") && ANDROID_NS.equals(a.nsOf(ns))) {
+            if (elem.equals("provider") && attr.equals("name") && a.attrAndroid) realProviders.add(a.elemPos);
+            if (DECL_PERM_ELEMS.contains(elem) && attr.equals("name") && a.attrAndroid) {
                 String v = a.valueAt(ap, b);
                 if (v != null) declared.add(v);
             }
@@ -173,10 +195,9 @@ public final class AxmlPatcher {
             String val = a.valueAt(ap, b);
             if (val == null) return;
             String nv = null;
-            String nsUri = a.nsOf(ns);
             if (elem.equals("manifest") && ns == -1 && attr.equals("package")) {
                 nv = newPkg;
-            } else if (ANDROID_NS.equals(nsUri)) {
+            } else if (a.attrAndroid) {
                 if (attr.equals("name") && CLASS_ELEMS.contains(elem)) nv = qualify(val, oldPkg);
                 else if (CLASS_ATTRS.contains(attr)) nv = qualify(val, oldPkg);
                 else if (elem.equals("instrumentation") && attr.equals("targetPackage")) nv = swap(val, oldPkg, newPkg);
