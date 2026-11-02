@@ -119,14 +119,22 @@ public final class AxmlPatcher {
 
     /** Returns the package declared in the manifest. */
     public static String readPackage(byte[] axml) {
+        String p = readManifestAttr(axml, "package");
+        if (p == null) throw new IllegalArgumentException("package attribute not found");
+        return p;
+    }
+
+    /** Returns the split name of a split APK manifest, or null for a base APK. */
+    public static String readSplit(byte[] axml) { return readManifestAttr(axml, "split"); }
+
+    private static String readManifestAttr(byte[] axml, String name) {
         AxmlPatcher a = new AxmlPatcher(axml);
         byte[] rest = Arrays.copyOfRange(axml, a.poolEnd, axml.length);
         String[] out = new String[1];
         a.walk(rest, 0, (elem, ns, attr, ap, b) -> {
-            if (out[0] == null && elem.equals("manifest") && ns == -1 && attr.equals("package"))
+            if (out[0] == null && elem.equals("manifest") && ns == -1 && attr.equals(name))
                 out[0] = a.valueAt(ap, b);
         });
-        if (out[0] == null) throw new IllegalArgumentException("package attribute not found");
         return out[0];
     }
 

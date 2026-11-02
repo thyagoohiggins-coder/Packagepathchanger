@@ -18,12 +18,17 @@ public final class ApkRepacker {
         String str() { return new String(name, StandardCharsets.UTF_8); }
     }
 
-    public static String readPackage(File apk) throws Exception {
+    public static String readPackage(File apk) throws Exception { return AxmlPatcher.readPackage(readManifest(apk)); }
+
+    /** Split name of a split APK, or null when it is a base APK. */
+    public static String readSplit(File apk) throws Exception { return AxmlPatcher.readSplit(readManifest(apk)); }
+
+    static byte[] readManifest(File apk) throws Exception {
         try (RandomAccessFile in = new RandomAccessFile(apk, "r")) {
             for (Entry e : entries(in))
-                if (e.str().equals("AndroidManifest.xml")) return AxmlPatcher.readPackage(read(in, e));
+                if (e.str().equals("AndroidManifest.xml")) return read(in, e);
         }
-        throw new IllegalArgumentException("AndroidManifest.xml not found");
+        throw new IllegalArgumentException("AndroidManifest.xml not found in " + apk.getName());
     }
 
     public static void repack(File apk, File out, String newPkg, boolean authAndPerms, SigningKey key) throws Exception {
