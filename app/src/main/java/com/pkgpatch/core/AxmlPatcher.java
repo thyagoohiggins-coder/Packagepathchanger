@@ -22,12 +22,16 @@ public final class AxmlPatcher {
             "targetActivity", "backupAgent", "manageSpaceActivity", "parentActivityName"));
     private static final Set<String> PERM_ELEMS = new HashSet<>(Arrays.asList(
             "permission", "permission-group", "permission-tree", "uses-permission", "uses-permission-sdk-23"));
-    private static final Set<String> PREFIX_ATTRS = new HashSet<>(Arrays.asList(
-            "permission", "readPermission", "writePermission", "taskAffinity", "process"));
+    private static final Set<String> DECL_PERM_ELEMS = new HashSet<>(Arrays.asList(
+            "permission", "permission-group", "permission-tree"));
+    private static final Set<String> PERM_ATTRS = new HashSet<>(Arrays.asList(
+            "permission", "readPermission", "writePermission", "permissionGroup"));
+    private static final Set<String> PREFIX_ATTRS = new HashSet<>(Arrays.asList("taskAffinity", "process"));
 
     private final byte[] src;
     private boolean utf8;
     private int poolEnd;
+    private int elemPos;
     private final List<String> strings = new ArrayList<>();
     private final List<byte[]> raw = new ArrayList<>();
 
@@ -103,6 +107,7 @@ public final class AxmlPatcher {
             int type = b.getShort(p) & 0xFFFF, size = b.getInt(p + 4);
             if (size <= 0) break;
             if (type == START_ELEM) {
+                elemPos = p;
                 String elem = strings.get(b.getInt(p + 20));
                 int attrStart = b.getShort(p + 24) & 0xFFFF, attrSize = b.getShort(p + 26) & 0xFFFF;
                 int cnt = b.getShort(p + 28) & 0xFFFF;
@@ -152,6 +157,17 @@ public final class AxmlPatcher {
         final Map<String, Integer> index = new HashMap<>();
         for (int i = 0; i < a.strings.size(); i++) index.putIfAbsent(a.strings.get(i), i);
         final List<String> added = new ArrayList<>();
+        // Permissions/groups declared by this app: they must get unique names or the install fails
+        // with INSTALL_FAILED_DUPLICATE_PERMISSION while the original app is installed.
+        final Set<String> declared = new HashSet<>();
+        final Set<Integer> realProviders = new HashSet<>(); // <provider> with a class name, not <queries><provider>
+        a.walk(rest, 0, (elem, ns, attr, ap, b) -> {
+            if (elem.equals("provider") && attr.equals("name") && ANDROID_NS.equals(a.nsOf(ns))) realProviders.add(a.elemPos);
+            if (DECL_PERM_ELEMS.contains(elem) && attr.equals("name") && ANDROID_NS.equals(a.nsOf(ns))) {
+                String v = a.valueAt(ap, b);
+                if (v != null) declared.add(v);
+            }
+        });
 
         a.walk(rest, 0, (elem, ns, attr, ap, b) -> {
             String val = a.valueAt(ap, b);
@@ -166,10 +182,12 @@ public final class AxmlPatcher {
                 else if (elem.equals("instrumentation") && attr.equals("targetPackage")) nv = swap(val, oldPkg, newPkg);
                 else if (changeAuthoritiesAndPerms) {
                     if (attr.equals("authorities") && elem.equals("provider")) {
+                        if (!realProviders.contains(a.elemPos)) return;
                         String[] parts = val.split(";", -1);
-                        for (int i = 0; i < parts.length; i++) parts[i] = swap(parts[i], oldPkg, newPkg);
+                        for (int i = 0; i < parts.length; i++) parts[i] = authority(parts[i], oldPkg, newPkg);
                         nv = String.join(";", parts);
-                    } else if (attr.equals("name") && PERM_ELEMS.contains(elem)) nv = swap(val, oldPkg, newPkg);
+                    } else if (attr.equals("name") && PERM_ELEMS.contains(elem)) nv = perm(val, oldPkg, newPkg, declared);
+                    else if (PERM_ATTRS.contains(attr)) nv = perm(val, oldPkg, newPkg, declared);
                     else if (PREFIX_ATTRS.contains(attr)) nv = swap(val, oldPkg, newPkg);
                 }
             }
@@ -209,6 +227,18 @@ public final class AxmlPatcher {
         if (v.startsWith(".")) return pkg + v;
         if (!v.contains(".")) return pkg + "." + v;
         return v;
+    }
+
+    /** Provider authorities are global: anything not derived from the old package gets the new package as prefix. */
+    static String authority(String v, String oldPkg, String newPkg) {
+        if (v.isEmpty()) return v;
+        String s = swap(v, oldPkg, newPkg);
+        return s.equals(v) && !v.equals(newPkg) && !v.startsWith(newPkg + ".") ? newPkg + "." + v : s;
+    }
+
+    static String perm(String v, String oldPkg, String newPkg, Set<String> declared) {
+        String s = swap(v, oldPkg, newPkg);
+        return s.equals(v) && declared.contains(v) ? newPkg + "." + v : s;
     }
 
     static String swap(String v, String oldPkg, String newPkg) {

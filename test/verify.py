@@ -31,8 +31,18 @@ names = {e.get(P + 'name') for e in root.iter() if e.get(P + 'name')}
 for n in [f'{"com.example.old"}.App', 'com.example.old.MainActivity', 'com.example.old.Other', 'com.lib.ThirdParty',
           'com.example.old.sub.Svc', 'com.example.old.Prov', newpkg + '.permission.PRIV']:
     assert n in names, n
-prov = [e for e in root.iter('provider')][0].get(P + 'authorities')
+provs = [e for e in root.iter('provider') if e.get(P + 'name')]
+assert [e for e in root.iter('provider') if not e.get(P + 'name')][0].get(P + 'authorities') == 'com.thirdparty.auth'
+prov = provs[0].get(P + 'authorities')
 assert prov == f'{newpkg}.provider;{newpkg}.other', prov
+p2 = provs[1]
+assert p2.get(P + 'authorities') == f'{newpkg}.com.example.oldmail.provider', p2.get(P + 'authorities')
+NP = f'{newpkg}.com.example.oldmail.permission.READ'
+assert p2.get(P + 'readPermission') == NP
+assert [e for e in root.iter('permission') if e.get(P + 'name') == NP][0].get(P + 'permissionGroup') == f'{newpkg}.com.example.oldmail.GROUP'
+assert [e for e in root.iter('permission-group')][0].get(P + 'name') == f'{newpkg}.com.example.oldmail.GROUP'
+ups = {e.get(P + 'name') for e in root.iter('uses-permission')}
+assert NP in ups and 'com.other.permission.X' in ups and 'android.permission.INTERNET' in ups, ups
 assert root.find('.//application').get(P + 'taskAffinity') == newpkg
 assert [e for e in root.iter('activity')][1].get(P + 'parentActivityName') == 'com.example.old.MainActivity'
 # v2 signature, independent verification

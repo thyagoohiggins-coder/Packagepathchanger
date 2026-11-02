@@ -6,12 +6,18 @@ xml = f'''<manifest xmlns:android="{A}" package="com.example.old" android:versio
 <uses-permission android:name="android.permission.INTERNET"/>
 <permission android:name="com.example.old.permission.PRIV" android:protectionLevel="signature"/>
 <uses-permission android:name="com.example.old.permission.PRIV"/>
+<permission android:name="com.example.oldmail.permission.READ" android:permissionGroup="com.example.oldmail.GROUP"/>
+<permission-group android:name="com.example.oldmail.GROUP"/>
+<uses-permission android:name="com.example.oldmail.permission.READ"/>
+<uses-permission android:name="com.other.permission.X"/>
+<queries><provider android:authorities="com.thirdparty.auth"/></queries>
 <application android:name=".App" android:label="Test" android:taskAffinity="com.example.old">
 <activity android:name=".MainActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity>
 <activity android:name="Other" android:parentActivityName=".MainActivity"/>
 <activity android:name="com.lib.ThirdParty"/>
 <service android:name="com.example.old.sub.Svc" android:process=":remote"/>
 <provider android:name=".Prov" android:authorities="com.example.old.provider;com.example.old.other" android:exported="false"/>
+<provider android:name=".Prov2" android:authorities="com.example.oldmail.provider" android:readPermission="com.example.oldmail.permission.READ"/>
 </application></manifest>'''
 a = axml.AXML(); a.from_xml(etree.fromstring(xml.encode()))
 m = a.pack()
